@@ -49,6 +49,47 @@ function stopSessionCacheCleanup(): void {
   }
 }
 
+// ADD THIS: Server-level API key authentication middleware
+function createApiKeyMiddleware() {
+  const expectedApiKey = process.env.MCP_API_KEY;
+  
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    // Skip auth check for health endpoint if no API key is configured
+    if (req.path === '/' && !expectedApiKey) {
+      return next();
+    }
+    
+    // If API key is configured, require it for all endpoints
+    if (expectedApiKey) {
+      const authHeader = req.headers.authorization;
+      
+      if (!authHeader) {
+        console.error('[API Key Auth] Missing Authorization header');
+        return res.status(401).json({
+          error: 'Authorization required',
+          message: 'Please provide an API key via Authorization header'
+        });
+      }
+      
+      // Support both "Bearer TOKEN" and just "TOKEN"
+      const providedKey = authHeader.startsWith('Bearer ') 
+        ? authHeader.slice(7).trim()
+        : authHeader.trim();
+      
+      if (providedKey !== expectedApiKey) {
+        console.error('[API Key Auth] Invalid API key');
+        return res.status(403).json({
+          error: 'Invalid API key'
+        });
+      }
+      
+      console.error('[API Key Auth] ✅ Valid API key');
+    }
+    
+    next();
+  };
+}
+
 export async function setupHttpTransport(
   server: McpServer,
   config: Extract<TransportConfig, { transportType: "http" }>
@@ -71,6 +112,9 @@ export async function setupHttpTransport(
   );
 
   app.use(express.json({limit: "4mb"}));
+  
+  // ADD THIS: Apply API key authentication to all routes
+  app.use(createApiKeyMiddleware());
 
   // Health check endpoint
   app.get("/", (req, res) => {
@@ -79,6 +123,8 @@ export async function setupHttpTransport(
       version: VERSION,
       transport: "http",
       activeSessions: sessionManager.getSessionCount(),
+      // Show if API key protection is enabled
+      protected: !!process.env.MCP_API_KEY
     });
   });
 
