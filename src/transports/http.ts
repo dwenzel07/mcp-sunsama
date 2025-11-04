@@ -49,7 +49,6 @@ function stopSessionCacheCleanup(): void {
   }
 }
 
-// REPLACE the existing createApiKeyMiddleware function with this:
 function createApiKeyMiddleware() {
   const expectedApiKey = process.env.MCP_API_KEY;
   
@@ -59,9 +58,9 @@ function createApiKeyMiddleware() {
       return next();
     }
     
-    // If API key is configured, require it for all endpoints
+    // If API key is configured, require it via custom header
     if (expectedApiKey) {
-      // Check CUSTOM HEADER instead of Authorization
+      // Use custom header X-MCP-API-Key instead of Authorization
       const providedKey = req.headers['x-mcp-api-key'] as string;
       
       if (!providedKey) {
@@ -100,6 +99,7 @@ export async function setupHttpTransport(
       allowedHeaders: [
         "Content-Type",
         "Authorization",
+        "X-MCP-API-Key",         // ← ADD THIS LINE
         "Mcp-Session-Id",
         "Last-Event-ID",
       ],
