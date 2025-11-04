@@ -6,6 +6,39 @@ import { setupHttpTransport } from "./transports/http.js";
 import { allTools } from "./tools/index.js";
 import { apiDocumentationResource } from "./resources/index.js";
 import { VERSION, SERVER_NAME } from "./constants.js";
+import { createServer } from 'http';
+import express from 'express'; // If you're using Express
+
+const app = express();
+
+// Authentication middleware
+const authenticate = (req: any, res: any, next: any) => {
+  const authHeader = req.headers.authorization;
+  const expectedToken = process.env.MCP_API_KEY; 
+  
+  if (!expectedToken) {
+    console.error('MCP_API_KEY not configured');
+    return res.status(500).json({ error: 'Server misconfigured' });
+  }
+  
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Authorization header required' });
+  }
+  
+  // Support both "Bearer TOKEN" and just "TOKEN"
+  const token = authHeader.startsWith('Bearer ') 
+    ? authHeader.slice(7) 
+    : authHeader;
+  
+  if (token !== expectedToken) {
+    return res.status(403).json({ error: 'Invalid API key' });
+  }
+  
+  next();
+};
+
+// Apply authentication to all routes (or specific MCP routes)
+app.use(authenticate);
 
 // Async IIFE for top-level await and error handling
 (async () => {
