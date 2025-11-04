@@ -1,9 +1,11 @@
+// src/transports/http.ts
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import cors from "cors";
-import express, { Request, Response, NextFunction } from "express";
+import express from "express";
+import type { Request, Response, NextFunction } from "express";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -54,7 +56,6 @@ function createApiKeyMiddleware() {
     // Allow health check if no key configured
     if (req.path === "/" && !expectedApiKey) return next();
 
-    // Enforce X-MCP-API-Key when configured
     if (expectedApiKey) {
       const provided = (req.headers["x-mcp-api-key"] as string | undefined)?.trim();
       if (!provided) {
@@ -73,14 +74,28 @@ function createApiKeyMiddleware() {
           id: null,
         });
       }
-      // console.error("[API Key Auth] ✅ Valid API key"); // noisy in prod
     }
     next();
   };
 }
 
 // -------------------------------
-/** Start the HTTP transport (Streamable HTTP) */
+// Helpers to build SessionData
+// -------------------------------
+function sessionFromApiKey(): SessionData {
+  const now = new Date();
+  // Fill the required fields of your SessionData.
+  // sunsamaClient is not used in API-key mode; set to a benign placeholder.
+  return {
+    email: "api-key@local",
+    sunsamaClient: null as unknown as SessionData["sunsamaClient"],
+    createdAt: now,
+    lastAccessedAt: now,
+  } as SessionData;
+}
+
+// -------------------------------
+// HTTP Transport (Streamable HTTP)
 // -------------------------------
 export async function setupHttpTransport(
   server: McpServer,
@@ -106,7 +121,7 @@ export async function setupHttpTransport(
 
   app.use(express.json({ limit: "4mb" }));
 
-  // Global API key auth (fallback Basic handled in initialize branch)
+  // Global API key auth (Basic is handled inside initialize fallback)
   app.use(createApiKeyMiddleware());
 
   // Health check
@@ -149,12 +164,12 @@ export async function setupHttpTransport(
       else if (!sessionId && isInitializeRequest(req.body)) {
         console.error("[Transport] New initialization request");
 
-        // Prefer API key; fall back to Basic auth
+        // Prefer API key; fall back to Basic auth (Sunsama email:password)
         const apiKeyHeader = (req.headers["x-mcp-api-key"] as string | undefined)?.trim();
         const expectedKey = process.env.MCP_API_KEY;
 
         if (expectedKey && apiKeyHeader === expectedKey) {
-          sessionData = { method: "api-key", subject: "api-key-client" } as SessionData;
+          sessionData = sessionFromApiKey();
           console.error("[Auth] API key accepted");
         } else {
           const authHeader = Array.isArray(req.headers["authorization"])
