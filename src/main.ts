@@ -58,9 +58,24 @@ Authentication:
   // Transport selection
   const config = getTransportConfig();
 
+  // Simple API key middleware (optional toggle)
+  import express from "express";
+  const app = express();
+
+  if (process.env.AUTH_DISABLED !== "true") {
+    app.use((req, res, next) => {
+      const authHeader = req.headers.authorization;
+      const expected = `Bearer ${process.env.API_KEY}`;
+      if (!authHeader || authHeader !== expected) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      next();
+    });
+  }
+
   try {
     if (config.transportType === "http") {
-      await setupHttpTransport(server, config);
+      await setupHttpTransport(server, config, app);
     } else {
       await setupStdioTransport(server);
     }
