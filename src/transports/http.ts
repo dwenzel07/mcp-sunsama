@@ -49,7 +49,7 @@ function stopSessionCacheCleanup(): void {
   }
 }
 
-// ADD THIS: Server-level API key authentication middleware
+// REPLACE the existing createApiKeyMiddleware function with this:
 function createApiKeyMiddleware() {
   const expectedApiKey = process.env.MCP_API_KEY;
   
@@ -61,22 +61,18 @@ function createApiKeyMiddleware() {
     
     // If API key is configured, require it for all endpoints
     if (expectedApiKey) {
-      const authHeader = req.headers.authorization;
+      // Check CUSTOM HEADER instead of Authorization
+      const providedKey = req.headers['x-mcp-api-key'] as string;
       
-      if (!authHeader) {
-        console.error('[API Key Auth] Missing Authorization header');
+      if (!providedKey) {
+        console.error('[API Key Auth] Missing X-MCP-API-Key header');
         return res.status(401).json({
-          error: 'Authorization required',
-          message: 'Please provide an API key via Authorization header'
+          error: 'API key required',
+          message: 'Please provide X-MCP-API-Key header'
         });
       }
       
-      // Support both "Bearer TOKEN" and just "TOKEN"
-      const providedKey = authHeader.startsWith('Bearer ') 
-        ? authHeader.slice(7).trim()
-        : authHeader.trim();
-      
-      if (providedKey !== expectedApiKey) {
+      if (providedKey.trim() !== expectedApiKey) {
         console.error('[API Key Auth] Invalid API key');
         return res.status(403).json({
           error: 'Invalid API key'
