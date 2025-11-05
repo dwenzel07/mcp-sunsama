@@ -50,11 +50,12 @@ cp .env.example .env
 ```
 
 Environment variables:
-- `SUNSAMA_EMAIL` - Your Sunsama account email (required for stdio transport)
-- `SUNSAMA_PASSWORD` - Your Sunsama account password (required for stdio transport)
+- `SUNSAMA_EMAIL` - Your Sunsama account email (required for stdio transport and HTTP token auth)
+- `SUNSAMA_PASSWORD` - Your Sunsama account password (required for stdio transport and HTTP token auth)
 - `TRANSPORT_MODE` - Transport type: `stdio` (default) or `http`
 - `PORT` - Server port for HTTP transport (default: 8080)
 - `HTTP_ENDPOINT` - MCP endpoint path (default: `/mcp`)
+- `MCP_AUTH_TOKEN` - Optional token for remote MCP client authentication (enables token-based auth)
 - `SESSION_TTL` - Session timeout in milliseconds (default: 3600000 / 1 hour)
 - `CLIENT_IDLE_TIMEOUT` - Client idle timeout in milliseconds (default: 900000 / 15 minutes)
 - `MAX_SESSIONS` - Maximum concurrent sessions for HTTP transport (default: 100)
@@ -83,16 +84,60 @@ TRANSPORT_MODE=http PORT=8080 bun run src/main.ts
 - MCP Endpoint: `POST http://localhost:8080/mcp`
 - Health Check: `GET http://localhost:8080/`
 
-**Authentication:**
-HTTP requests require HTTP Basic Auth with your Sunsama credentials:
-```bash
-curl -X POST http://localhost:8080/mcp \
-  -H "Authorization: Basic $(echo -n 'your-email:your-password' | base64)" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
-```
+**Authentication Methods:**
+
+The HTTP transport supports multiple authentication methods:
+
+1. **Token Authentication (Recommended for Remote Access)**
+
+   Set `MCP_AUTH_TOKEN` environment variable on the server:
+   ```bash
+   # Generate a secure token
+   export MCP_AUTH_TOKEN=$(openssl rand -base64 32)
+
+   # Start server with token auth enabled
+   TRANSPORT_MODE=http \
+   PORT=8080 \
+   MCP_AUTH_TOKEN=$MCP_AUTH_TOKEN \
+   SUNSAMA_EMAIL=your-email@example.com \
+   SUNSAMA_PASSWORD=your-password \
+   bun run src/main.ts
+   ```
+
+   Clients can authenticate using:
+
+   - **Query Parameter** (Best for Claude Desktop):
+     ```
+     http://localhost:8080/mcp?token=your-secret-token
+     ```
+
+   - **Bearer Token Header**:
+     ```bash
+     curl -X POST http://localhost:8080/mcp \
+       -H "Authorization: Bearer your-secret-token" \
+       -H "Content-Type: application/json" \
+       -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
+     ```
+
+2. **HTTP Basic Auth (Fallback)**
+
+   When `MCP_AUTH_TOKEN` is not set (or as fallback when it is set):
+   ```bash
+   curl -X POST http://localhost:8080/mcp \
+     -H "Authorization: Basic $(echo -n 'your-email:your-password' | base64)" \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
+   ```
+
+**Authentication Priority:**
+When `MCP_AUTH_TOKEN` is configured, the server checks authentication in this order:
+1. Query parameter `?token=xxx`
+2. Bearer token in Authorization header
+3. HTTP Basic Auth (fallback)
 
 ### Claude Desktop Configuration
+
+#### Local Configuration (Stdio Transport)
 
 Add this configuration to your Claude Desktop MCP settings:
 
@@ -110,6 +155,38 @@ Add this configuration to your Claude Desktop MCP settings:
   }
 }
 ```
+
+#### Remote Configuration (HTTP Transport with Token Auth)
+
+For connecting to a remote MCP server (e.g., deployed on Render, Railway, Heroku):
+
+```json
+{
+  "mcpServers": {
+    "sunsama": {
+      "url": "https://your-server.onrender.com/mcp?token=your-secret-token",
+      "transport": "sse"
+    }
+  }
+}
+```
+
+**Setup Steps:**
+1. Deploy the server with HTTP transport and token authentication enabled
+2. Set environment variables on your deployment:
+   - `TRANSPORT_MODE=http`
+   - `PORT=8080` (or your platform's required port)
+   - `MCP_AUTH_TOKEN=your-secret-token` (generate with `openssl rand -base64 32`)
+   - `SUNSAMA_EMAIL=your-email@example.com`
+   - `SUNSAMA_PASSWORD=your-password`
+3. Use the query parameter URL format in Claude Desktop config
+
+**Security Best Practices:**
+- Use a strong, randomly generated token (at least 32 characters)
+- Never commit tokens to version control
+- Use HTTPS for remote connections
+- Rotate tokens periodically
+- Consider using different tokens for different clients
 
 ## API Tools
 
@@ -222,7 +299,21 @@ __tests__/
 
 **Stdio Transport:** Requires `SUNSAMA_EMAIL` and `SUNSAMA_PASSWORD` environment variables.
 
-**HTTP Transport:** Credentials provided via HTTP Basic Auth per request. No environment variables needed for credentials.
+**HTTP Transport:** Supports multiple authentication methods:
+
+- **Token Authentication** (recommended for remote access): Set `MCP_AUTH_TOKEN` environment variable on the server. Requires `SUNSAMA_EMAIL` and `SUNSAMA_PASSWORD` on the server. Clients authenticate using:
+  - Query parameter: `?token=your-secret-token`
+  - Bearer header: `Authorization: Bearer your-secret-token`
+  - HTTP Basic Auth (fallback)
+
+- **HTTP Basic Auth** (traditional): Credentials provided via HTTP Basic Auth per request. When `MCP_AUTH_TOKEN` is not set, this is the only accepted method.
+
+**Migration from Basic Auth to Token Auth:**
+1. Generate a secure token: `openssl rand -base64 32`
+2. Set `MCP_AUTH_TOKEN` environment variable on your server
+3. Ensure `SUNSAMA_EMAIL` and `SUNSAMA_PASSWORD` are set on the server
+4. Update clients to use query parameter or Bearer token authentication
+5. Basic Auth will continue to work as a fallback
 
 ## Contributing
 

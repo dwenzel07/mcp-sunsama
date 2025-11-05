@@ -112,8 +112,10 @@ export async function setupHttpTransport(
 
         // Authenticate and get/create cached client
         const authHeader = req.headers["authorization"];
+        const queryToken = req.query.token as string | undefined;
         sessionData = await authenticateHttpRequest(
-          Array.isArray(authHeader) ? authHeader[0] : authHeader
+          Array.isArray(authHeader) ? authHeader[0] : authHeader,
+          queryToken
         );
 
         // Create new transport

@@ -23,7 +23,8 @@ const TransportEnvSchema = z.object({
       message: "HTTP_ENDPOINT must start with '/'"
     })
     .transform(val => val as `/${string}`)
-    .default("/mcp")
+    .default("/mcp"),
+  MCP_AUTH_TOKEN: z.string().optional()
 });
 
 export function getTransportConfig(): TransportConfig {
@@ -40,4 +41,12 @@ export function getTransportConfig(): TransportConfig {
   }
 
   return { transportType: "stdio" };
+}
+
+/**
+ * Get the optional MCP authentication token for HTTP transport
+ */
+export function getMcpAuthToken(): string | undefined {
+  const env = TransportEnvSchema.parse(process.env);
+  return env.MCP_AUTH_TOKEN;
 }

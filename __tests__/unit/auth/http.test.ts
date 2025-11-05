@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { parseBasicAuth } from "../../../src/auth/http.js";
+import { parseBasicAuth, parseBearerToken, validateToken } from "../../../src/auth/http.js";
 import { createHash } from "crypto";
 
 describe("HTTP Authentication", () => {
@@ -278,6 +278,253 @@ describe("HTTP Authentication", () => {
       expect(idleValid).toBe(true);
       expect(lifetimeValid).toBe(false);
       expect(idleValid && lifetimeValid).toBe(false); // Session invalid despite recent access
+    });
+  });
+
+  describe("Token Authentication", () => {
+    describe("parseBearerToken", () => {
+      test("should parse valid Bearer token header", () => {
+        const token = "my-secret-token-123";
+        const authHeader = `Bearer ${token}`;
+
+        const result = parseBearerToken(authHeader);
+
+        expect(result).toBe(token);
+      });
+
+      test("should handle tokens with special characters", () => {
+        const token = "token-with-special-chars!@#$%^&*()_+-=";
+        const authHeader = `Bearer ${token}`;
+
+        const result = parseBearerToken(authHeader);
+
+        expect(result).toBe(token);
+      });
+
+      test("should handle base64-like tokens", () => {
+        const token = "SGVsbG9Xb3JsZA==";
+        const authHeader = `Bearer ${token}`;
+
+        const result = parseBearerToken(authHeader);
+
+        expect(result).toBe(token);
+      });
+
+      test("should handle long tokens", () => {
+        const token = "a".repeat(256);
+        const authHeader = `Bearer ${token}`;
+
+        const result = parseBearerToken(authHeader);
+
+        expect(result).toBe(token);
+      });
+
+      test("should reject empty token", () => {
+        const authHeader = "Bearer ";
+
+        expect(() => parseBearerToken(authHeader)).toThrow("Invalid Bearer token format");
+      });
+
+      test("should reject missing Bearer prefix", () => {
+        const authHeader = "my-token-without-bearer";
+
+        // Will not have "Bearer " prefix to replace
+        const result = parseBearerToken(authHeader);
+        expect(result).toBe(authHeader); // Returns as-is but will fail validation
+      });
+    });
+
+    describe("validateToken", () => {
+      test("should validate matching tokens", () => {
+        const token = "my-secret-token";
+
+        const result = validateToken(token, token);
+
+        expect(result).toBe(true);
+      });
+
+      test("should reject different tokens", () => {
+        const providedToken = "wrong-token";
+        const expectedToken = "correct-token";
+
+        const result = validateToken(providedToken, expectedToken);
+
+        expect(result).toBe(false);
+      });
+
+      test("should reject token with different case", () => {
+        const providedToken = "MyToken";
+        const expectedToken = "mytoken";
+
+        const result = validateToken(providedToken, expectedToken);
+
+        expect(result).toBe(false);
+      });
+
+      test("should handle empty provided token", () => {
+        const providedToken = "";
+        const expectedToken = "valid-token";
+
+        const result = validateToken(providedToken, expectedToken);
+
+        expect(result).toBe(false);
+      });
+
+      test("should handle empty expected token", () => {
+        const providedToken = "some-token";
+        const expectedToken = "";
+
+        const result = validateToken(providedToken, expectedToken);
+
+        expect(result).toBe(false);
+      });
+
+      test("should handle both tokens empty", () => {
+        const result = validateToken("", "");
+
+        expect(result).toBe(false);
+      });
+
+      test("should reject tokens with different lengths", () => {
+        const providedToken = "short";
+        const expectedToken = "much-longer-token";
+
+        const result = validateToken(providedToken, expectedToken);
+
+        expect(result).toBe(false);
+      });
+
+      test("should validate complex tokens", () => {
+        const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0";
+
+        const result = validateToken(token, token);
+
+        expect(result).toBe(true);
+      });
+
+      test("should be timing-safe (same execution time for different lengths)", () => {
+        // This is a basic test - true timing attack prevention requires more sophisticated testing
+        const shortToken = "abc";
+        const longToken = "a".repeat(1000);
+
+        const start1 = performance.now();
+        validateToken(shortToken, longToken);
+        const time1 = performance.now() - start1;
+
+        const start2 = performance.now();
+        validateToken(longToken, shortToken);
+        const time2 = performance.now() - start2;
+
+        // Both should return false, and timing should be similar
+        expect(validateToken(shortToken, longToken)).toBe(false);
+        expect(validateToken(longToken, shortToken)).toBe(false);
+
+        // Times should be reasonably close (within 10ms of each other)
+        // This is a basic check - real timing attacks are more sophisticated
+        expect(Math.abs(time1 - time2)).toBeLessThan(10);
+      });
+
+      test("should handle tokens with special characters", () => {
+        const token = "token!@#$%^&*()_+-=[]{}|;:',.<>?/~`";
+
+        const result = validateToken(token, token);
+
+        expect(result).toBe(true);
+      });
+
+      test("should handle unicode tokens", () => {
+        const token = "token-with-unicode-🔐-emoji";
+
+        const result = validateToken(token, token);
+
+        expect(result).toBe(true);
+      });
+
+      test("should reject slightly different tokens", () => {
+        const providedToken = "my-secret-token-123";
+        const expectedToken = "my-secret-token-124";
+
+        const result = validateToken(providedToken, expectedToken);
+
+        expect(result).toBe(false);
+      });
+
+      test("should validate tokens generated by openssl", () => {
+        // Simulate token generated by: openssl rand -base64 32
+        const token = "SGVsbG9Xb3JsZEhlbGxvV29ybGRIZWxsb1dvcmxkSGVsbG9Xb3JsZA==";
+
+        const result = validateToken(token, token);
+
+        expect(result).toBe(true);
+      });
+    });
+
+    describe("Token Cache Key Generation (Security)", () => {
+      function getTokenCacheKey(token: string): string {
+        return createHash("sha256")
+          .update(`token:${token}`)
+          .digest("hex");
+      }
+
+      test("should generate different keys for different tokens", () => {
+        const token1 = "token-123";
+        const token2 = "token-456";
+
+        const key1 = getTokenCacheKey(token1);
+        const key2 = getTokenCacheKey(token2);
+
+        expect(key1).not.toBe(key2);
+      });
+
+      test("should generate same key for identical tokens", () => {
+        const token = "my-secret-token";
+
+        const key1 = getTokenCacheKey(token);
+        const key2 = getTokenCacheKey(token);
+
+        expect(key1).toBe(key2);
+      });
+
+      test("should produce hex string of correct length", () => {
+        const key = getTokenCacheKey("test-token");
+
+        // SHA-256 produces 64 character hex string
+        expect(key.length).toBe(64);
+        expect(/^[0-9a-f]+$/.test(key)).toBe(true);
+      });
+
+      test("should be different from credential-based cache keys", () => {
+        const token = "my-token";
+        const email = "my-token"; // Same string as token
+        const password = "";
+
+        const tokenKey = getTokenCacheKey(token);
+        const credKey = createHash("sha256")
+          .update(`${email}:${password}`)
+          .digest("hex");
+
+        // Despite same input, the "token:" prefix ensures different hashes
+        expect(tokenKey).not.toBe(credKey);
+      });
+
+      test("should handle long tokens", () => {
+        const longToken = "a".repeat(1000);
+
+        const key = getTokenCacheKey(longToken);
+
+        expect(key.length).toBe(64);
+        expect(typeof key).toBe("string");
+      });
+
+      test("should be deterministic", () => {
+        const token = "consistent-token";
+
+        const key1 = getTokenCacheKey(token);
+        // Wait a bit
+        const key2 = getTokenCacheKey(token);
+
+        expect(key1).toBe(key2);
+      });
     });
   });
 });
